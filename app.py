@@ -101,7 +101,14 @@ def idmt_trip_times(currents: np.ndarray, settings: RelaySettings) -> np.ndarray
     ct_ratio = settings.ct_primary / max(settings.ct_secondary, 1e-9)
     pickup_primary = settings.pickup_amps * ct_ratio
     multiples = np.maximum(currents / pickup_primary, 1e-9)
-    idmt_time = settings.time_multiplier * (k / (np.power(multiples, exponent) - 1.0)) + time_offset
+
+    # The IEC equation is only defined for multiples > 1. Clamp lower values to NaN
+    # so they do not render on the log-log plot and avoid negative times.
+    valid_mask = multiples > 1.0
+    idmt_time = np.full_like(currents, np.nan)
+    idmt_time[valid_mask] = (
+        settings.time_multiplier * (k / (np.power(multiples[valid_mask], exponent) - 1.0)) + time_offset
+    )
 
     if settings.instantaneous_pickup is None:
         return idmt_time
@@ -246,7 +253,7 @@ def sidebar_device_inputs(device_count: int) -> Tuple[List[RelaySettings], List[
         if device_type == "Relay":
             curve = st.sidebar.selectbox("Curve family", list(IEC_CURVES.keys()), key=f"curve_{idx}")
             ct_primary = st.sidebar.number_input(
-                "CT primary (A)", min_value=1.0, value=600.0, step=5.0, key=f"ct_primary_{idx}"
+                "CT primary (A)", min_value=1.0, value=400.0, step=5.0, key=f"ct_primary_{idx}"
             )
             ct_secondary = st.sidebar.number_input(
                 "CT secondary (A)", min_value=0.1, value=5.0, step=0.1, key=f"ct_secondary_{idx}"
@@ -254,7 +261,7 @@ def sidebar_device_inputs(device_count: int) -> Tuple[List[RelaySettings], List[
             pickup = st.sidebar.number_input(
                 "Pickup current setting (A secondary)",
                 min_value=0.1,
-                value=100.0,
+                value=5.0,
                 help="Secondary pickup setting; primary pickup uses CT ratio.",
                 key=f"pickup_{idx}",
             )
