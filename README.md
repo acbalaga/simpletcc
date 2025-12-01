@@ -5,8 +5,9 @@ It visualizes relay, fuse, and optional damage curves so you can validate time
 margins between downstream and upstream devices.
 
 ## Features
-- IEC inverse-time relay curves with configurable pickup, time multiplier, and instantaneous elements.
-- Placeholder fuse melting curves using an I^p model (replace constants with manufacturer data).
+- IEC and ANSI/IEEE inverse-time relay/recloser curves with configurable pickup, time multiplier, and instantaneous elements.
+- Placeholder fuse and molded-case breaker melting curves using an I^p model (replace constants with manufacturer data).
+- Manufacturer-specific fuse presets flagged as placeholders so you can swap in catalog values.
 - Optional cable/transformer damage curves for margin checks.
 - Log-log Plotly chart with coordination warnings based on a user-defined margin.
 
@@ -24,7 +25,8 @@ margins between downstream and upstream devices.
 ## Notes
 - Curve equations are simplified for quick studies. Always verify settings against manufacturer
   TCC data and detailed short-circuit analysis before applying them in the field.
-- The fuse and damage curves rely on placeholder constants; adjust them per equipment data.
+- Fuse, molded-case breaker, and manufacturer presets are marked as placeholders unless noted; adjust
+  them per equipment data.
 
 ## Suggested quick test
 - Run `python -m compileall app.py` to ensure the app imports cleanly after edits.

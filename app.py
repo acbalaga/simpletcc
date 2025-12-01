@@ -1,8 +1,8 @@
 """Streamlit app for coordinating TCC curves.
 
-This tool helps compare overcurrent protective devices using simplified
-IEC relay curves and placeholder fuse/damage representations. It focuses on clarity
-and quick visualization rather than manufacturer-accurate curve data.
+This tool helps compare overcurrent protective devices using standardized IEC and
+ANSI/IEEE inverse-time curves plus placeholder fuse/damage representations. It focuses
+on clarity and quick visualization rather than manufacturer-accurate curve data.
 """
 from __future__ import annotations
 
@@ -24,6 +24,7 @@ class RelaySettings:
     instantaneous_time: float
     ct_primary: float
     ct_secondary: float
+    device_type: str = "Relay"
 
 
 @dataclass
@@ -33,6 +34,7 @@ class FuseSettings:
     melting_constant: float
     exponent: float
     minimum_time: float
+    device_type: str = "Fuse"
 
 
 @dataclass
@@ -69,24 +71,129 @@ class CoordinationDiagnostic:
     current_at_min_a: float
 
 
-# IEC 60255-151 style constants for IDMT relays.
-IEC_CURVES: Dict[str, Tuple[float, float, float]] = {
-    "Standard Inverse": (0.14, 0.02, 0.0),
-    "Very Inverse": (13.5, 1.0, 0.0),
-    "Extremely Inverse": (80.0, 2.0, 0.0),
+@dataclass
+class InverseCurveDefinition:
+    k: float
+    exponent: float
+    time_offset: float
+    standard: str
+    verified: bool
+    note: str
+
+
+# IEC 60255-151 and IEEE C37.112 style constants for IDMT relays and reclosers.
+INVERSE_CURVES: Dict[str, InverseCurveDefinition] = {
+    "IEC Standard Inverse": InverseCurveDefinition(
+        0.14,
+        0.02,
+        0.0,
+        standard="IEC 60255-151",
+        verified=True,
+        note="Standardized constants per IEC 60255-151.",
+    ),
+    "IEC Very Inverse": InverseCurveDefinition(
+        13.5,
+        1.0,
+        0.0,
+        standard="IEC 60255-151",
+        verified=True,
+        note="Standardized constants per IEC 60255-151.",
+    ),
+    "IEC Extremely Inverse": InverseCurveDefinition(
+        80.0,
+        2.0,
+        0.0,
+        standard="IEC 60255-151",
+        verified=True,
+        note="Standardized constants per IEC 60255-151.",
+    ),
+    "ANSI Moderately Inverse": InverseCurveDefinition(
+        0.0515,
+        0.02,
+        0.114,
+        standard="IEEE C37.112",
+        verified=True,
+        note="IEEE C37.112 Table 1 (moderately inverse).",
+    ),
+    "ANSI Very Inverse": InverseCurveDefinition(
+        1.0,
+        2.0,
+        0.0226,
+        standard="IEEE C37.112",
+        verified=True,
+        note="IEEE C37.112 Table 1 (very inverse).",
+    ),
+    "ANSI Extremely Inverse": InverseCurveDefinition(
+        2.0,
+        2.0,
+        0.00342,
+        standard="IEEE C37.112",
+        verified=True,
+        note="IEEE C37.112 Table 1 (extremely inverse).",
+    ),
 }
 
 # Approximate fuse presets. These are simplified placeholders based on generic time-current
 # shapes (not manufacturer-verified). Replace with catalog data for production studies.
-FUSE_PRESETS: Dict[str, FuseSettings] = {
+@dataclass
+class FusePreset:
+    settings: FuseSettings
+    verified: bool
+    note: str
+
+
+FUSE_PRESETS: Dict[str, FusePreset] = {
     # Values are illustrative, scaled around the fuse ampere rating. Replace with catalog curves for studies.
-    "Class RK5 (time-delay)": FuseSettings("Class RK5", 100.0, 90000.0, 2.1, 0.05),
-    "Class RK1 (current-limiting)": FuseSettings("Class RK1", 100.0, 40000.0, 1.7, 0.02),
-    "Class J (fast-acting)": FuseSettings("Class J", 100.0, 24000.0, 1.8, 0.015),
-    "Class T (very fast)": FuseSettings("Class T", 100.0, 12000.0, 1.6, 0.01),
-    "Type K (time-delay)": FuseSettings("Type K", 100.0, 80000.0, 2.0, 0.04),
-    "SloFast": FuseSettings("SloFast", 100.0, 120000.0, 2.2, 0.06),
-    "Motor protection": FuseSettings("Motor", 100.0, 60000.0, 1.9, 0.03),
+    "Class RK5 (time-delay)": FusePreset(
+        FuseSettings("Class RK5", 100.0, 90000.0, 2.1, 0.05),
+        verified=False,
+        note="Placeholder melting curve; replace with manufacturer sheet.",
+    ),
+    "Class RK1 (current-limiting)": FusePreset(
+        FuseSettings("Class RK1", 100.0, 40000.0, 1.7, 0.02),
+        verified=False,
+        note="Placeholder for current-limiting RK1 profile.",
+    ),
+    "Class J (fast-acting)": FusePreset(
+        FuseSettings("Class J", 100.0, 24000.0, 1.8, 0.015),
+        verified=False,
+        note="Placeholder fast-acting curve; confirm with catalog data.",
+    ),
+    "Class T (very fast)": FusePreset(
+        FuseSettings("Class T", 100.0, 12000.0, 1.6, 0.01),
+        verified=False,
+        note="Placeholder for very fast-acting T-class fuse.",
+    ),
+    "Type K (time-delay)": FusePreset(
+        FuseSettings("Type K", 100.0, 80000.0, 2.0, 0.04),
+        verified=False,
+        note="Placeholder time-delay fuse curve.",
+    ),
+    "SloFast": FusePreset(
+        FuseSettings("SloFast", 100.0, 120000.0, 2.2, 0.06),
+        verified=False,
+        note="Placeholder dual-element thermal fuse approximation.",
+    ),
+    "Motor protection": FusePreset(
+        FuseSettings("Motor", 100.0, 60000.0, 1.9, 0.03),
+        verified=False,
+        note="Placeholder motor circuit protector approximation.",
+    ),
+    "Bussmann Low-Peak LPS-RK (placeholder)": FusePreset(
+        FuseSettings("LPS-RK", 100.0, 70000.0, 2.1, 0.05),
+        verified=False,
+        note="Manufacturer-specific placeholder; swap constants with Bussmann data sheets.",
+    ),
+    "S&C SMU-20 recloser curve (placeholder)": FusePreset(
+        FuseSettings("SMU-20", 100.0, 50000.0, 2.0, 0.04, device_type="Recloser"),
+        verified=False,
+        note="Recloser melting-style placeholder; replace with published minimum-trip curve.",
+    ),
+    "Molded-case breaker thermal (placeholder)": FusePreset(
+        FuseSettings("MCCB thermal", 100.0, 30000.0, 2.5, 0.02, device_type="Molded-case breaker"),
+        verified=False,
+        note="Thermal-magnetic placeholder; use manufacturer time-current data for studies.",
+    ),
 }
 
 # Approximate withstand curves for common equipment. Constants are illustrative only and
@@ -99,6 +206,7 @@ DEFAULT_DAMAGE_CURVES: List[DamageCurve] = [
 
 
 DEFAULT_COLORS = ["#1f77b4", "#ff7f0e", "#2ca02c", "#d62728", "#9467bd", "#8c564b"]
+DEVICE_TYPE_OPTIONS = ["Relay", "Recloser", "Molded-case breaker", "Fuse"]
 
 
 def idmt_trip_times(currents: np.ndarray, settings: RelaySettings) -> np.ndarray:
@@ -107,7 +215,8 @@ def idmt_trip_times(currents: np.ndarray, settings: RelaySettings) -> np.ndarray
     The equation is the classic k / ((I/Is)^a - 1) scaled by the time multiplier.
     Instantaneous pickup is applied as a parallel path (min of IDMT time and inst time).
     """
-    k, exponent, time_offset = IEC_CURVES[settings.curve]
+    curve = INVERSE_CURVES[settings.curve]
+    k, exponent, time_offset = curve.k, curve.exponent, curve.time_offset
     ct_ratio = settings.ct_primary / max(settings.ct_secondary, 1e-9)
     pickup_primary = settings.pickup_amps * ct_ratio
     multiples = np.maximum(currents / pickup_primary, 1e-9)
@@ -154,7 +263,7 @@ def build_curves(currents: np.ndarray, relays: List[RelaySettings], fuses: List[
         curves.append(
             DeviceCurve(
                 name=f"{relay.name} (CT {relay.ct_primary:.0f}/{relay.ct_secondary:.1f})",
-                device_type="Relay",
+                device_type=relay.device_type,
                 current_points=currents,
                 time_points=times,
                 color=DEFAULT_COLORS[idx % len(DEFAULT_COLORS)],
@@ -167,7 +276,7 @@ def build_curves(currents: np.ndarray, relays: List[RelaySettings], fuses: List[
         curves.append(
             DeviceCurve(
                 name=fuse.name,
-                device_type="Fuse",
+                device_type=fuse.device_type,
                 current_points=currents,
                 time_points=times,
                 color=DEFAULT_COLORS[(start_idx + idx) % len(DEFAULT_COLORS)],
@@ -362,13 +471,31 @@ def sidebar_device_inputs(device_count: int) -> Tuple[List[RelaySettings], List[
         st.sidebar.subheader(f"Device {idx + 1}")
         device_type = st.sidebar.selectbox(
             "Device type",
-            options=["Relay", "Fuse"],
+            options=DEVICE_TYPE_OPTIONS,
             key=f"type_{idx}",
+            help=(
+                "Relays/reclosers use inverse-time curves. Molded-case breakers and fuses"
+                " rely on melting-style placeholders; replace constants with catalog data."
+            ),
         )
         name = st.sidebar.text_input("Name", value=f"Device {idx + 1}", key=f"name_{idx}")
 
-        if device_type == "Relay":
-            curve = st.sidebar.selectbox("Curve family", list(IEC_CURVES.keys()), key=f"curve_{idx}")
+        if device_type in {"Relay", "Recloser"}:
+            curve_options = list(INVERSE_CURVES.keys())
+            curve_labels = {
+                key: f"{key} ({'verified' if val.verified else 'placeholder'} - {val.standard})"
+                for key, val in INVERSE_CURVES.items()
+            }
+            curve = st.sidebar.selectbox(
+                "Curve family",
+                curve_options,
+                key=f"curve_{idx}",
+                format_func=lambda key: curve_labels.get(key, key),
+                help="IEC curves are standardized; ANSI MI/VI/EI curves follow IEEE C37.112.",
+            )
+            st.sidebar.caption(
+                f"{curve_labels[curve]}. Notes: {INVERSE_CURVES[curve].note}"
+            )
             ct_primary = st.sidebar.number_input(
                 "CT primary (A)", min_value=1.0, value=400.0, step=5.0, key=f"ct_primary_{idx}"
             )
@@ -403,31 +530,61 @@ def sidebar_device_inputs(device_count: int) -> Tuple[List[RelaySettings], List[
                     instantaneous_time=inst_time,
                     ct_primary=ct_primary,
                     ct_secondary=ct_secondary,
+                    device_type=device_type,
                 )
             )
         else:
+            preset_options = ["Custom"] + [
+                name
+                for name, preset in FUSE_PRESETS.items()
+                if preset.settings.device_type == device_type or preset.settings.device_type == "Fuse"
+            ]
             preset_label = st.sidebar.selectbox(
                 "Preset fuse type",
-                options=["Custom"] + list(FUSE_PRESETS.keys()),
+                options=preset_options,
                 index=0,
                 key=f"fuse_preset_{idx}",
-                help="Preset constants are illustrative; replace with manufacturer data for studies.",
+                format_func=lambda key: (
+                    key
+                    if key == "Custom"
+                    else f"{key} ({'verified' if FUSE_PRESETS[key].verified else 'placeholder'})"
+                ),
+                help="Preset constants are illustrative; manufacturer-specific entries are marked as placeholders unless noted.",
             )
             preset = FUSE_PRESETS.get(preset_label)
+            preset_settings = preset.settings if preset else None
+            if preset:
+                st.sidebar.caption(preset.note)
 
             # Update session defaults when a preset changes so the inputs reflect the selected curve.
             preset_state_key = f"fuse_last_preset_{idx}"
             if preset_label != "Custom" and st.session_state.get(preset_state_key) != preset_label:
                 st.session_state[preset_state_key] = preset_label
-                st.session_state[f"pickup_{idx}"] = preset.pickup_amps
-                st.session_state[f"melting_const_{idx}"] = preset.melting_constant
-                st.session_state[f"exp_{idx}"] = preset.exponent
-                st.session_state[f"min_time_{idx}"] = preset.minimum_time
+                st.session_state[f"pickup_{idx}"] = preset_settings.pickup_amps
+                st.session_state[f"melting_const_{idx}"] = preset_settings.melting_constant
+                st.session_state[f"exp_{idx}"] = preset_settings.exponent
+                st.session_state[f"min_time_{idx}"] = preset_settings.minimum_time
 
-            pickup_default = preset.pickup_amps if preset else st.session_state.get(f"pickup_{idx}", 200.0)
-            melting_default = preset.melting_constant if preset else st.session_state.get(f"melting_const_{idx}", 12000.0)
-            exponent_default = preset.exponent if preset else st.session_state.get(f"exp_{idx}", 2.0)
-            min_time_default = preset.minimum_time if preset else st.session_state.get(f"min_time_{idx}", 0.02)
+            pickup_default = (
+                preset_settings.pickup_amps
+                if preset_settings
+                else st.session_state.get(f"pickup_{idx}", 200.0)
+            )
+            melting_default = (
+                preset_settings.melting_constant
+                if preset_settings
+                else st.session_state.get(f"melting_const_{idx}", 12000.0)
+            )
+            exponent_default = (
+                preset_settings.exponent
+                if preset_settings
+                else st.session_state.get(f"exp_{idx}", 2.0)
+            )
+            min_time_default = (
+                preset_settings.minimum_time
+                if preset_settings
+                else st.session_state.get(f"min_time_{idx}", 0.02)
+            )
 
             pickup = st.sidebar.number_input(
                 "Pickup/melting current (A)", min_value=0.1, value=pickup_default, key=f"pickup_{idx}"
@@ -445,6 +602,9 @@ def sidebar_device_inputs(device_count: int) -> Tuple[List[RelaySettings], List[
             minimum_time = st.sidebar.number_input(
                 "Minimum clear time (s)", min_value=0.0, value=min_time_default, step=0.01, key=f"min_time_{idx}"
             )
+            st.sidebar.caption(
+                "Placeholders are intended for quick studies only. Replace with manufacturer datasets before issuing settings."
+            )
             fuses.append(
                 FuseSettings(
                     name=name,
@@ -452,6 +612,7 @@ def sidebar_device_inputs(device_count: int) -> Tuple[List[RelaySettings], List[
                     melting_constant=melting_constant,
                     exponent=exponent,
                     minimum_time=minimum_time,
+                    device_type=preset_settings.device_type if preset_settings else device_type,
                 )
             )
 
@@ -570,9 +731,10 @@ def main() -> None:
     st.title("Time-Current Characteristic (TCC) Coordinator")
     st.write(
         """
-        Configure overcurrent devices and visualize their time-current curves. The app uses
-        IEC-style IDMT equations for relays and simple I^p placeholders for fuses and damage curves.
-        Replace placeholder constants with manufacturer data for production studies.
+        Configure overcurrent devices and visualize their time-current curves. The app offers IEC 60255 and
+        ANSI/IEEE MI/VI/EI inverse-time families for relays or reclosers plus simple I^p placeholders for fuses,
+        molded-case breakers, and damage curves. Replace placeholder constants with manufacturer data for production
+        studies.
         """
     )
 
@@ -633,9 +795,11 @@ def main() -> None:
     st.subheader("How to use")
     st.markdown(
         """
-        1. Use the sidebar to add relays and fuses in downstream-to-upstream order.
-        2. Enter manufacturer pickup, time-dial, and instantaneous settings for relays, along with CT ratios.
-        3. Pick a preset fuse family or enter manufacturer melting constants and exponents.
+        1. Use the sidebar to add relays, reclosers, molded-case breakers, and fuses in downstream-to-upstream order.
+        2. Enter manufacturer pickup, time-dial, and instantaneous settings for relays, along with CT ratios. Choose IEC or
+           ANSI MI/VI/EI curve families as needed.
+        3. Pick a preset fuse/breaker family or enter manufacturer melting constants and exponents. Sidebar labels call out
+           placeholders versus standardized/verified curves.
         4. Add optional cable or transformer damage curves (preset or custom) to visualize margins.
         5. Overlay a reference marker (e.g., full-load current) to check operating points against curves.
         6. Adjust the coordination margin to reflect your practice (e.g., 0.2–0.3 s between devices).
