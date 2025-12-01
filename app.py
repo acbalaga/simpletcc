@@ -188,7 +188,11 @@ def evaluate_coordination(curves: Iterable[DeviceCurve], current_checks: np.ndar
 
 
 def plot_curves(
-    curves: List[DeviceCurve], damage_curves: List[DamageCurve], currents: np.ndarray, reference_points: Optional[List[ReferencePoint]] = None
+    curves: List[DeviceCurve],
+    damage_curves: List[DamageCurve],
+    currents: np.ndarray,
+    reference_points: Optional[List[ReferencePoint]] = None,
+    coordination_current: Optional[float] = None,
 ) -> go.Figure:
     """Render TCC curves on a log-log plot with optional reference markers."""
     fig = go.Figure()
@@ -228,6 +232,35 @@ def plot_curves(
                     hovertemplate="%{text}<br>Current: %{x:.2f} A<br>Time: %{y:.3f} s<extra></extra>",
                 )
             )
+
+    if coordination_current:
+        times_for_bounds: List[float] = []
+        for curve in curves:
+            times_for_bounds.extend(np.asarray(curve.time_points, dtype=float))
+        for damage_curve in damage_curves:
+            times_for_bounds.extend(damage_withstand_times(currents, damage_curve))
+        if reference_points:
+            times_for_bounds.extend(point.time_seconds for point in reference_points)
+
+        finite_times = np.asarray(times_for_bounds, dtype=float)
+        finite_times = finite_times[np.isfinite(finite_times) & (finite_times > 0)]
+        y_min = float(np.nanmin(finite_times)) if finite_times.size > 0 else 0.001
+        y_max = float(np.nanmax(finite_times)) if finite_times.size > 0 else 10.0
+        # Ensure the line spans a visible portion of the log axis.
+        if y_min == y_max:
+            y_min *= 0.8
+            y_max *= 1.2
+
+        fig.add_trace(
+            go.Scatter(
+                x=[coordination_current, coordination_current],
+                y=[y_min, y_max],
+                mode="lines",
+                name="Coordination current",
+                line=dict(color="#111", dash="dot", width=2),
+                hovertemplate="Coordination current<br>Current: %{x:.2f} A<extra></extra>",
+            )
+        )
 
     fig.update_xaxes(title="Current (A)", type="log", exponentformat="power")
     fig.update_yaxes(title="Time (s)", type="log", exponentformat="power")
@@ -408,7 +441,7 @@ def sidebar_damage_inputs() -> List[DamageCurve]:
     return damage_curves
 
 
-def sidebar_reference_points() -> List[ReferencePoint]:
+def sidebar_reference_points() -> Tuple[List[ReferencePoint], Optional[float]]:
     """Optional point markers (e.g., full-load current) to overlay on the plot."""
     points: List[ReferencePoint] = []
     st.sidebar.markdown("---")
@@ -431,7 +464,21 @@ def sidebar_reference_points() -> List[ReferencePoint]:
             key="ref_time",
         )
         points.append(ReferencePoint(name=name, current=current, time_seconds=time_seconds))
-    return points
+
+    coordination_current: Optional[float] = None
+    st.sidebar.markdown("---")
+    st.sidebar.subheader("Coordination current")
+    add_coordination_line = st.sidebar.checkbox("Show coordination current line", value=False)
+    if add_coordination_line:
+        coordination_current = st.sidebar.number_input(
+            "Coordination current (A)",
+            min_value=0.1,
+            value=500.0,
+            help="Draw a vertical line at this current to visualize coordination margins.",
+            key="coordination_current",
+        )
+
+    return points, coordination_current
 
 
 def main() -> None:
@@ -449,7 +496,7 @@ def main() -> None:
     device_count = st.sidebar.number_input("Number of devices", min_value=1, value=2, step=1)
     relays, fuses = sidebar_device_inputs(int(device_count))
     damage_curves = sidebar_damage_inputs()
-    reference_points = sidebar_reference_points()
+    reference_points, coordination_current = sidebar_reference_points()
 
     st.sidebar.markdown("---")
     st.sidebar.subheader("Coordination checks")
@@ -461,7 +508,13 @@ def main() -> None:
     currents = np.logspace(np.log10(current_min), np.log10(current_max), num=200)
     curves = build_curves(currents, relays, fuses)
 
-    fig = plot_curves(curves, damage_curves, currents, reference_points=reference_points)
+    fig = plot_curves(
+        curves,
+        damage_curves,
+        currents,
+        reference_points=reference_points,
+        coordination_current=coordination_current,
+    )
     st.plotly_chart(fig, use_container_width=True)
 
     check_currents = np.logspace(np.log10(current_min), np.log10(current_max), num=80)
