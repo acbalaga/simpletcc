@@ -355,13 +355,36 @@ def sidebar_damage_inputs() -> List[DamageCurve]:
     )
     for name in selected_presets:
         preset_curve = next(curve for curve in DEFAULT_DAMAGE_CURVES if curve.name == name)
-        damage_curves.append(
-            DamageCurve(
-                name=preset_curve.name,
-                withstand_constant=preset_curve.withstand_constant,
-                exponent=preset_curve.exponent,
-                minimum_time=preset_curve.minimum_time,
+        key_prefix = f"damage_preset_{name.replace(' ', '_')[:30]}"
+        constant_default = st.session_state.get(f"{key_prefix}_constant", preset_curve.withstand_constant)
+        exponent_default = st.session_state.get(f"{key_prefix}_exponent", preset_curve.exponent)
+        min_time_default = st.session_state.get(f"{key_prefix}_min_time", preset_curve.minimum_time)
+
+        with st.sidebar.expander(f"{name} settings", expanded=False):
+            constant = st.number_input(
+                "Withstand constant (A^p * s)",
+                min_value=0.001,
+                value=constant_default,
+                help="Edit the preset to reflect updated thermal limits.",
+                key=f"{key_prefix}_constant",
             )
+            exponent = st.number_input(
+                "Exponent p",
+                min_value=1.0,
+                value=exponent_default,
+                step=0.1,
+                key=f"{key_prefix}_exponent",
+            )
+            minimum_time = st.number_input(
+                "Minimum withstand time (s)",
+                min_value=0.0,
+                value=min_time_default,
+                step=0.01,
+                key=f"{key_prefix}_min_time",
+            )
+
+        damage_curves.append(
+            DamageCurve(name=preset_curve.name, withstand_constant=constant, exponent=exponent, minimum_time=minimum_time)
         )
     damage_count = st.sidebar.number_input("Number of damage curves", min_value=0, value=0, step=1)
     for idx in range(int(damage_count)):
