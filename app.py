@@ -59,6 +59,16 @@ class DeviceCurve:
     color: str
 
 
+@dataclass
+class CoordinationDiagnostic:
+    """Minimum observed margin and current between adjacent protective devices."""
+
+    upstream_device: str
+    downstream_device: str
+    min_margin_s: float
+    current_at_min_a: float
+
+
 # IEC 60255-151 style constants for IDMT relays.
 IEC_CURVES: Dict[str, Tuple[float, float, float]] = {
     "Standard Inverse": (0.14, 0.02, 0.0),
@@ -166,25 +176,56 @@ def build_curves(currents: np.ndarray, relays: List[RelaySettings], fuses: List[
     return curves
 
 
-def evaluate_coordination(curves: Iterable[DeviceCurve], current_checks: np.ndarray, margin_s: float) -> List[str]:
-    """Check that sequential curves maintain the desired time margin.
+def evaluate_coordination(
+    curves: Iterable[DeviceCurve],
+    current_checks: np.ndarray,
+    margin_s: float,
+    return_diagnostics: bool = False,
+) -> Tuple[List[str], List[CoordinationDiagnostic]]:
+    """Check sequential curves for time margin and optionally return diagnostics.
 
     The curves are evaluated in the order provided by the user. The check is conservative;
     it flags any point where the next device clears less than `margin_s` slower than the
-    downstream device at the same current.
+    downstream device at the same current. When ``return_diagnostics`` is True the function
+    also returns the minimum observed margin and the current where it occurs for each
+    adjacent pair, enabling the UI to show actionable detail. Diagnostics are returned as
+    an empty list when the flag is False.
     """
     messages: List[str] = []
+    diagnostics: List[CoordinationDiagnostic] = []
     curve_list = list(curves)
     for upstream, downstream in zip(curve_list[:-1], curve_list[1:]):
         upstream_time = np.interp(current_checks, upstream.current_points, upstream.time_points)
         downstream_time = np.interp(current_checks, downstream.current_points, downstream.time_points)
         delta = downstream_time - upstream_time
-        min_delta = float(np.nanmin(delta))
+
+        finite_mask = np.isfinite(delta)
+        if not np.any(finite_mask):
+            min_delta = float("nan")
+            current_at_min = float("nan")
+        else:
+            min_idx = int(np.nanargmin(delta))
+            min_delta = float(delta[min_idx])
+            current_at_min = float(current_checks[min_idx])
+
+        diagnostics.append(
+            CoordinationDiagnostic(
+                upstream_device=upstream.name,
+                downstream_device=downstream.name,
+                min_margin_s=min_delta,
+                current_at_min_a=current_at_min,
+            )
+        )
+
         if min_delta < margin_s:
             messages.append(
                 f"{downstream.name} coordinates poorly with {upstream.name}: minimum margin {min_delta:.3f}s < {margin_s:.3f}s."
             )
-    return messages
+
+    if return_diagnostics:
+        return messages, diagnostics
+
+    return messages, []
 
 
 def plot_curves(
@@ -518,7 +559,27 @@ def main() -> None:
     st.plotly_chart(fig, use_container_width=True)
 
     check_currents = np.logspace(np.log10(current_min), np.log10(current_max), num=80)
-    messages = evaluate_coordination(curves, check_currents, margin_s)
+    messages, diagnostics = evaluate_coordination(
+        curves, check_currents, margin_s, return_diagnostics=True
+    )
+
+    if diagnostics:
+        st.subheader("Coordination summary")
+        st.table(
+            [
+                {
+                    "Upstream device": diag.upstream_device,
+                    "Downstream device": diag.downstream_device,
+                    "Min margin (s)": round(diag.min_margin_s, 4)
+                    if np.isfinite(diag.min_margin_s)
+                    else "N/A",
+                    "Current at min (A)": round(diag.current_at_min_a, 2)
+                    if np.isfinite(diag.current_at_min_a)
+                    else "N/A",
+                }
+                for diag in diagnostics
+            ]
+        )
 
     if messages:
         st.error("\n".join(messages))
