@@ -69,8 +69,12 @@ IEC_CURVES: Dict[str, Tuple[float, float, float]] = {
 # Approximate fuse presets. These are simplified placeholders based on generic time-current
 # shapes (not manufacturer-verified). Replace with catalog data for production studies.
 FUSE_PRESETS: Dict[str, FuseSettings] = {
+    # Values are illustrative, scaled around the fuse ampere rating. Replace with catalog curves for studies.
+    "Class RK5 (time-delay)": FuseSettings("Class RK5", 100.0, 90000.0, 2.1, 0.05),
+    "Class RK1 (current-limiting)": FuseSettings("Class RK1", 100.0, 40000.0, 1.7, 0.02),
+    "Class J (fast-acting)": FuseSettings("Class J", 100.0, 24000.0, 1.8, 0.015),
+    "Class T (very fast)": FuseSettings("Class T", 100.0, 12000.0, 1.6, 0.01),
     "Type K (time-delay)": FuseSettings("Type K", 100.0, 80000.0, 2.0, 0.04),
-    "Fast-acting": FuseSettings("Fast", 100.0, 16000.0, 1.8, 0.01),
     "SloFast": FuseSettings("SloFast", 100.0, 120000.0, 2.2, 0.06),
     "Motor protection": FuseSettings("Motor", 100.0, 60000.0, 1.9, 0.03),
 }
@@ -113,7 +117,8 @@ def fuse_trip_times(currents: np.ndarray, settings: FuseSettings) -> np.ndarray:
     Real-world fuse curves should come from manufacturer data. This placeholder uses
     I^exponent * t = constant to sketch the curve shape.
     """
-    times = settings.melting_constant / np.power(np.maximum(currents, 1e-9), settings.exponent)
+    multiples = np.maximum(currents / max(settings.pickup_amps, 1e-9), 1e-9)
+    times = settings.melting_constant / np.power(multiples, settings.exponent)
     times = np.maximum(times, settings.minimum_time)
     return times
 
@@ -285,10 +290,20 @@ def sidebar_device_inputs(device_count: int) -> Tuple[List[RelaySettings], List[
                 help="Preset constants are illustrative; replace with manufacturer data for studies.",
             )
             preset = FUSE_PRESETS.get(preset_label)
-            pickup_default = preset.pickup_amps if preset else 200.0
-            melting_default = preset.melting_constant if preset else 12000.0
-            exponent_default = preset.exponent if preset else 2.0
-            min_time_default = preset.minimum_time if preset else 0.02
+
+            # Update session defaults when a preset changes so the inputs reflect the selected curve.
+            preset_state_key = f"fuse_last_preset_{idx}"
+            if preset_label != "Custom" and st.session_state.get(preset_state_key) != preset_label:
+                st.session_state[preset_state_key] = preset_label
+                st.session_state[f"pickup_{idx}"] = preset.pickup_amps
+                st.session_state[f"melting_const_{idx}"] = preset.melting_constant
+                st.session_state[f"exp_{idx}"] = preset.exponent
+                st.session_state[f"min_time_{idx}"] = preset.minimum_time
+
+            pickup_default = preset.pickup_amps if preset else st.session_state.get(f"pickup_{idx}", 200.0)
+            melting_default = preset.melting_constant if preset else st.session_state.get(f"melting_const_{idx}", 12000.0)
+            exponent_default = preset.exponent if preset else st.session_state.get(f"exp_{idx}", 2.0)
+            min_time_default = preset.minimum_time if preset else st.session_state.get(f"min_time_{idx}", 0.02)
 
             pickup = st.sidebar.number_input(
                 "Pickup/melting current (A)", min_value=0.1, value=pickup_default, key=f"pickup_{idx}"
