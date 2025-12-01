@@ -196,12 +196,48 @@ def evaluate_coordination(
     diagnostics: List[CoordinationDiagnostic] = []
     curve_list = list(curves)
     for downstream_curve, upstream_curve in zip(curve_list[:-1], curve_list[1:]):
-        downstream_time = np.interp(
-            current_checks, downstream_curve.current_points, downstream_curve.time_points
+        # Only compare within the portion of each curve that has finite time values to avoid
+        # interpolating through undefined regions (e.g., below pickup).
+        downstream_mask = np.isfinite(downstream_curve.time_points) & np.isfinite(
+            downstream_curve.current_points
         )
-        upstream_time = np.interp(
-            current_checks, upstream_curve.current_points, upstream_curve.time_points
+        upstream_mask = np.isfinite(upstream_curve.time_points) & np.isfinite(
+            upstream_curve.current_points
         )
+
+        downstream_currents = downstream_curve.current_points[downstream_mask]
+        downstream_times = downstream_curve.time_points[downstream_mask]
+        upstream_currents = upstream_curve.current_points[upstream_mask]
+        upstream_times = upstream_curve.time_points[upstream_mask]
+
+        if downstream_currents.size == 0 or upstream_currents.size == 0:
+            diagnostics.append(
+                CoordinationDiagnostic(
+                    upstream_device=upstream_curve.name,
+                    downstream_device=downstream_curve.name,
+                    min_margin_s=float("nan"),
+                    current_at_min_a=float("nan"),
+                )
+            )
+            continue
+
+        overlap_min = max(float(np.min(downstream_currents)), float(np.min(upstream_currents)))
+        overlap_max = min(float(np.max(downstream_currents)), float(np.max(upstream_currents)))
+        overlap_checks = current_checks[(current_checks >= overlap_min) & (current_checks <= overlap_max)]
+
+        if overlap_min >= overlap_max or overlap_checks.size == 0:
+            diagnostics.append(
+                CoordinationDiagnostic(
+                    upstream_device=upstream_curve.name,
+                    downstream_device=downstream_curve.name,
+                    min_margin_s=float("nan"),
+                    current_at_min_a=float("nan"),
+                )
+            )
+            continue
+
+        downstream_time = np.interp(overlap_checks, downstream_currents, downstream_times)
+        upstream_time = np.interp(overlap_checks, upstream_currents, upstream_times)
         delta = upstream_time - downstream_time
 
         finite_mask = np.isfinite(delta)
@@ -209,9 +245,11 @@ def evaluate_coordination(
             min_delta = float("nan")
             current_at_min = float("nan")
         else:
-            min_idx = int(np.nanargmin(delta))
-            min_delta = float(delta[min_idx])
-            current_at_min = float(current_checks[min_idx])
+            finite_delta = delta[finite_mask]
+            finite_currents = overlap_checks[finite_mask]
+            min_idx = int(np.argmin(finite_delta))
+            min_delta = float(finite_delta[min_idx])
+            current_at_min = float(finite_currents[min_idx])
 
         diagnostics.append(
             CoordinationDiagnostic(
@@ -222,7 +260,7 @@ def evaluate_coordination(
             )
         )
 
-        if min_delta < margin_s:
+        if np.isfinite(min_delta) and min_delta < margin_s:
             messages.append(
                 f"Upstream device {upstream_curve.name} coordinates poorly with downstream device {downstream_curve.name}: minimum margin {min_delta:.3f}s < {margin_s:.3f}s."
             )
