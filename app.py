@@ -10,6 +10,7 @@ from dataclasses import dataclass
 from typing import Dict, Iterable, List, Optional, Tuple
 
 import numpy as np
+import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
 
@@ -817,24 +818,26 @@ def main() -> None:
 
     if diagnostics:
         st.subheader("Coordination summary")
-        st.table(
-            [
-                {
-                    "Downstream device": f"Device {idx + 1}: {diag.downstream_device}",
-                    "Upstream device": f"Device {idx + 2}: {diag.upstream_device}",
-                    "Min margin (s)": round(diag.min_margin_s, 4)
-                    if np.isfinite(diag.min_margin_s)
-                    else "N/A",
-                    "Current at min (A)": round(diag.current_at_min_a, 2)
-                    if np.isfinite(diag.current_at_min_a)
-                    else "N/A",
-                    "Margin at coord. current (s)": round(diag.reference_margin_s, 4)
-                    if np.isfinite(diag.reference_margin_s)
-                    else "N/A",
-                }
-                for idx, diag in enumerate(diagnostics)
-            ]
-        )
+        summary_rows = [
+            {
+                "Downstream device": f"Device {idx + 1}: {diag.downstream_device}",
+                "Upstream device": f"Device {idx + 2}: {diag.upstream_device}",
+                "Min margin (s)": round(diag.min_margin_s, 4)
+                if np.isfinite(diag.min_margin_s)
+                else "N/A",
+                "Current at min (A)": round(diag.current_at_min_a, 2)
+                if np.isfinite(diag.current_at_min_a)
+                else "N/A",
+                "Margin at coord. current (s)": round(diag.reference_margin_s, 4)
+                if np.isfinite(diag.reference_margin_s)
+                else "N/A",
+            }
+            for idx, diag in enumerate(diagnostics)
+        ]
+
+        # Use a DataFrame to ensure Streamlit does not attempt a best-effort conversion that
+        # may trigger optional pandas imports inside Plotly.
+        st.table(pd.DataFrame(summary_rows))
 
     if messages:
         st.error("\n".join(messages))
