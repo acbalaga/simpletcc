@@ -69,6 +69,8 @@ class CoordinationDiagnostic:
     downstream_device: str
     min_margin_s: float
     current_at_min_a: float
+    reference_margin_s: float
+    reference_current_a: float
 
 
 @dataclass
@@ -255,31 +257,30 @@ def damage_withstand_times(currents: np.ndarray, curve: DamageCurve) -> np.ndarr
     return np.maximum(times, curve.minimum_time)
 
 
-def build_curves(currents: np.ndarray, relays: List[RelaySettings], fuses: List[FuseSettings]) -> List[DeviceCurve]:
-    """Combine relay and fuse definitions into plottable curves."""
+def build_curves(currents: np.ndarray, devices: List[RelaySettings | FuseSettings]) -> List[DeviceCurve]:
+    """Combine device definitions into plottable curves preserving user ordering."""
+
     curves: List[DeviceCurve] = []
-    for idx, relay in enumerate(relays):
-        times = idmt_trip_times(currents, relay)
+    for idx, device in enumerate(devices):
+        if isinstance(device, RelaySettings):
+            times = idmt_trip_times(currents, device)
+            name = f"{device.name} (CT {device.ct_primary:.0f}/{device.ct_secondary:.1f})"
+            device_type = device.device_type
+        elif isinstance(device, FuseSettings):
+            times = fuse_trip_times(currents, device)
+            name = device.name
+            device_type = device.device_type
+        else:
+            # This should not happen with current UI controls but keeps the function safe if extended.
+            raise TypeError("Unsupported device type for curve generation")
+
         curves.append(
             DeviceCurve(
-                name=f"{relay.name} (CT {relay.ct_primary:.0f}/{relay.ct_secondary:.1f})",
-                device_type=relay.device_type,
+                name=name,
+                device_type=device_type,
                 current_points=currents,
                 time_points=times,
                 color=DEFAULT_COLORS[idx % len(DEFAULT_COLORS)],
-            )
-        )
-
-    start_idx = len(relays)
-    for idx, fuse in enumerate(fuses):
-        times = fuse_trip_times(currents, fuse)
-        curves.append(
-            DeviceCurve(
-                name=fuse.name,
-                device_type=fuse.device_type,
-                current_points=currents,
-                time_points=times,
-                color=DEFAULT_COLORS[(start_idx + idx) % len(DEFAULT_COLORS)],
             )
         )
     return curves
@@ -290,6 +291,7 @@ def evaluate_coordination(
     current_checks: np.ndarray,
     margin_s: float,
     return_diagnostics: bool = False,
+    reference_current: Optional[float] = None,
 ) -> Tuple[List[str], List[CoordinationDiagnostic]]:
     """Check sequential curves for time margin and optionally return diagnostics.
 
@@ -299,12 +301,15 @@ def evaluate_coordination(
     When ``return_diagnostics`` is True the function also returns the minimum observed
     margin and the current where it occurs for each adjacent pair, enabling the UI to
     show actionable detail. Diagnostics are returned as an empty list when the flag is
-    False.
+    False. When ``reference_current`` is supplied, the function also reports the margin
+    at that current (if it lies within both curves' domains).
     """
     messages: List[str] = []
     diagnostics: List[CoordinationDiagnostic] = []
     curve_list = list(curves)
-    for downstream_curve, upstream_curve in zip(curve_list[:-1], curve_list[1:]):
+    for pair_index, (downstream_curve, upstream_curve) in enumerate(
+        zip(curve_list[:-1], curve_list[1:])
+    ):
         # Only compare within the portion of each curve that has finite time values to avoid
         # interpolating through undefined regions (e.g., below pickup).
         downstream_mask = np.isfinite(downstream_curve.time_points) & np.isfinite(
@@ -326,6 +331,10 @@ def evaluate_coordination(
                     downstream_device=downstream_curve.name,
                     min_margin_s=float("nan"),
                     current_at_min_a=float("nan"),
+                    reference_margin_s=float("nan"),
+                    reference_current_a=float(reference_current)
+                    if reference_current is not None
+                    else float("nan"),
                 )
             )
             continue
@@ -341,6 +350,10 @@ def evaluate_coordination(
                     downstream_device=downstream_curve.name,
                     min_margin_s=float("nan"),
                     current_at_min_a=float("nan"),
+                    reference_margin_s=float("nan"),
+                    reference_current_a=float(reference_current)
+                    if reference_current is not None
+                    else float("nan"),
                 )
             )
             continue
@@ -360,18 +373,48 @@ def evaluate_coordination(
             min_delta = float(finite_delta[min_idx])
             current_at_min = float(finite_currents[min_idx])
 
+        reference_margin = float("nan")
+        if (
+            reference_current is not None
+            and overlap_min <= reference_current <= overlap_max
+        ):
+            downstream_at_ref = float(
+                np.interp(reference_current, downstream_currents, downstream_times)
+            )
+            upstream_at_ref = float(
+                np.interp(reference_current, upstream_currents, upstream_times)
+            )
+            reference_margin = upstream_at_ref - downstream_at_ref
+
         diagnostics.append(
             CoordinationDiagnostic(
                 upstream_device=upstream_curve.name,
                 downstream_device=downstream_curve.name,
                 min_margin_s=min_delta,
                 current_at_min_a=current_at_min,
+                reference_margin_s=reference_margin,
+                reference_current_a=float(reference_current)
+                if reference_current is not None
+                else float("nan"),
             )
         )
 
         if np.isfinite(min_delta) and min_delta < margin_s:
             messages.append(
-                f"Upstream device {upstream_curve.name} coordinates poorly with downstream device {downstream_curve.name}: minimum margin {min_delta:.3f}s < {margin_s:.3f}s."
+                (
+                    f"Device {pair_index + 1} (downstream: {downstream_curve.name}) and "
+                    f"Device {pair_index + 2} (upstream: {upstream_curve.name}) coordinate poorly: "
+                    f"minimum margin {min_delta:.3f}s < {margin_s:.3f}s."
+                )
+            )
+
+        if np.isfinite(reference_margin) and reference_margin < margin_s:
+            messages.append(
+                (
+                    f"At {reference_current:.2f} A, Device {pair_index + 1} (downstream: {downstream_curve.name}) "
+                    f"and Device {pair_index + 2} (upstream: {upstream_curve.name}) have only {reference_margin:.3f}s margin "
+                    f"(< {margin_s:.3f}s)."
+                )
             )
 
     if return_diagnostics:
@@ -461,10 +504,10 @@ def plot_curves(
     return fig
 
 
-def sidebar_device_inputs(device_count: int) -> Tuple[List[RelaySettings], List[FuseSettings]]:
+def sidebar_device_inputs(device_count: int) -> List[RelaySettings | FuseSettings]:
     """Collect user-defined relay and fuse settings from the sidebar."""
-    relays: List[RelaySettings] = []
-    fuses: List[FuseSettings] = []
+
+    devices: List[RelaySettings | FuseSettings] = []
 
     for idx in range(device_count):
         st.sidebar.markdown("---")
@@ -520,7 +563,7 @@ def sidebar_device_inputs(device_count: int) -> Tuple[List[RelaySettings], List[
             inst_time = st.sidebar.number_input(
                 "Instantaneous clearing time (s)", min_value=0.01, value=0.05, key=f"inst_time_{idx}"
             )
-            relays.append(
+            devices.append(
                 RelaySettings(
                     name=name,
                     pickup_amps=pickup,
@@ -605,7 +648,7 @@ def sidebar_device_inputs(device_count: int) -> Tuple[List[RelaySettings], List[
             st.sidebar.caption(
                 "Placeholders are intended for quick studies only. Replace with manufacturer datasets before issuing settings."
             )
-            fuses.append(
+            devices.append(
                 FuseSettings(
                     name=name,
                     pickup_amps=pickup,
@@ -616,7 +659,7 @@ def sidebar_device_inputs(device_count: int) -> Tuple[List[RelaySettings], List[
                 )
             )
 
-    return relays, fuses
+    return devices
 
 
 def sidebar_damage_inputs() -> List[DamageCurve]:
@@ -740,7 +783,7 @@ def main() -> None:
 
     st.sidebar.header("Configuration")
     device_count = st.sidebar.number_input("Number of devices", min_value=1, value=2, step=1)
-    relays, fuses = sidebar_device_inputs(int(device_count))
+    devices = sidebar_device_inputs(int(device_count))
     damage_curves = sidebar_damage_inputs()
     reference_points, coordination_current = sidebar_reference_points()
 
@@ -752,7 +795,7 @@ def main() -> None:
 
     # Build curve data.
     currents = np.logspace(np.log10(current_min), np.log10(current_max), num=200)
-    curves = build_curves(currents, relays, fuses)
+    curves = build_curves(currents, devices)
 
     fig = plot_curves(
         curves,
@@ -765,7 +808,11 @@ def main() -> None:
 
     check_currents = np.logspace(np.log10(current_min), np.log10(current_max), num=80)
     messages, diagnostics = evaluate_coordination(
-        curves, check_currents, margin_s, return_diagnostics=True
+        curves,
+        check_currents,
+        margin_s,
+        return_diagnostics=True,
+        reference_current=coordination_current,
     )
 
     if diagnostics:
@@ -773,16 +820,19 @@ def main() -> None:
         st.table(
             [
                 {
-                    "Upstream device": diag.upstream_device,
-                    "Downstream device": diag.downstream_device,
+                    "Downstream device": f"Device {idx + 1}: {diag.downstream_device}",
+                    "Upstream device": f"Device {idx + 2}: {diag.upstream_device}",
                     "Min margin (s)": round(diag.min_margin_s, 4)
                     if np.isfinite(diag.min_margin_s)
                     else "N/A",
                     "Current at min (A)": round(diag.current_at_min_a, 2)
                     if np.isfinite(diag.current_at_min_a)
                     else "N/A",
+                    "Margin at coord. current (s)": round(diag.reference_margin_s, 4)
+                    if np.isfinite(diag.reference_margin_s)
+                    else "N/A",
                 }
-                for diag in diagnostics
+                for idx, diag in enumerate(diagnostics)
             ]
         )
 
