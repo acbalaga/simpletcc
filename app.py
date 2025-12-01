@@ -14,31 +14,6 @@ import plotly.graph_objects as go
 import streamlit as st
 
 
-# IEC 60255-151 style constants for IDMT relays.
-IEC_CURVES: Dict[str, Tuple[float, float, float]] = {
-    "Standard Inverse": (0.14, 0.02, 0.0),
-    "Very Inverse": (13.5, 1.0, 0.0),
-    "Extremely Inverse": (80.0, 2.0, 0.0),
-}
-
-# Approximate fuse presets. These are simplified placeholders based on generic time-current
-# shapes (not manufacturer-verified). Replace with catalog data for production studies.
-FUSE_PRESETS: Dict[str, FuseSettings] = {
-    "Type K (time-delay)": FuseSettings("Type K", 100.0, 80000.0, 2.0, 0.04),
-    "Fast-acting": FuseSettings("Fast", 100.0, 16000.0, 1.8, 0.01),
-    "SloFast": FuseSettings("SloFast", 100.0, 120000.0, 2.2, 0.06),
-    "Motor protection": FuseSettings("Motor", 100.0, 60000.0, 1.9, 0.03),
-}
-
-# Approximate withstand curves for common equipment. Constants are illustrative only and
-# should be replaced with utility or manufacturer data before field use.
-DEFAULT_DAMAGE_CURVES: List[DamageCurve] = [
-    DamageCurve("LV Cu cable 90C (approx)", withstand_constant=45000.0, exponent=2.0, minimum_time=0.1),
-    DamageCurve("LV Al cable 75C (approx)", withstand_constant=30000.0, exponent=2.0, minimum_time=0.1),
-    DamageCurve("Dry-type transformer (IEEE C57.109 approx)", withstand_constant=120000.0, exponent=1.0, minimum_time=1.0),
-]
-
-
 @dataclass
 class RelaySettings:
     name: str
@@ -82,6 +57,31 @@ class DeviceCurve:
     current_points: np.ndarray
     time_points: np.ndarray
     color: str
+
+
+# IEC 60255-151 style constants for IDMT relays.
+IEC_CURVES: Dict[str, Tuple[float, float, float]] = {
+    "Standard Inverse": (0.14, 0.02, 0.0),
+    "Very Inverse": (13.5, 1.0, 0.0),
+    "Extremely Inverse": (80.0, 2.0, 0.0),
+}
+
+# Approximate fuse presets. These are simplified placeholders based on generic time-current
+# shapes (not manufacturer-verified). Replace with catalog data for production studies.
+FUSE_PRESETS: Dict[str, FuseSettings] = {
+    "Type K (time-delay)": FuseSettings("Type K", 100.0, 80000.0, 2.0, 0.04),
+    "Fast-acting": FuseSettings("Fast", 100.0, 16000.0, 1.8, 0.01),
+    "SloFast": FuseSettings("SloFast", 100.0, 120000.0, 2.2, 0.06),
+    "Motor protection": FuseSettings("Motor", 100.0, 60000.0, 1.9, 0.03),
+}
+
+# Approximate withstand curves for common equipment. Constants are illustrative only and
+# should be replaced with utility or manufacturer data before field use.
+DEFAULT_DAMAGE_CURVES: List[DamageCurve] = [
+    DamageCurve("LV Cu cable 90C (approx)", withstand_constant=45000.0, exponent=2.0, minimum_time=0.1),
+    DamageCurve("LV Al cable 75C (approx)", withstand_constant=30000.0, exponent=2.0, minimum_time=0.1),
+    DamageCurve("Dry-type transformer (IEEE C57.109 approx)", withstand_constant=120000.0, exponent=1.0, minimum_time=1.0),
+]
 
 
 DEFAULT_COLORS = ["#1f77b4", "#ff7f0e", "#2ca02c", "#d62728", "#9467bd", "#8c564b"]
