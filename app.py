@@ -304,7 +304,9 @@ def evaluate_coordination(
     messages: List[str] = []
     diagnostics: List[CoordinationDiagnostic] = []
     curve_list = list(curves)
-    for downstream_curve, upstream_curve in zip(curve_list[:-1], curve_list[1:]):
+    for pair_index, (downstream_curve, upstream_curve) in enumerate(
+        zip(curve_list[:-1], curve_list[1:])
+    ):
         # Only compare within the portion of each curve that has finite time values to avoid
         # interpolating through undefined regions (e.g., below pickup).
         downstream_mask = np.isfinite(downstream_curve.time_points) & np.isfinite(
@@ -371,7 +373,11 @@ def evaluate_coordination(
 
         if np.isfinite(min_delta) and min_delta < margin_s:
             messages.append(
-                f"Upstream device {upstream_curve.name} coordinates poorly with downstream device {downstream_curve.name}: minimum margin {min_delta:.3f}s < {margin_s:.3f}s."
+                (
+                    f"Device {pair_index + 1} (downstream: {downstream_curve.name}) and "
+                    f"Device {pair_index + 2} (upstream: {upstream_curve.name}) coordinate poorly: "
+                    f"minimum margin {min_delta:.3f}s < {margin_s:.3f}s."
+                )
             )
 
     if return_diagnostics:
@@ -773,8 +779,8 @@ def main() -> None:
         st.table(
             [
                 {
-                    "Upstream device": diag.upstream_device,
-                    "Downstream device": diag.downstream_device,
+                    "Downstream device": f"Device {idx + 1}: {diag.downstream_device}",
+                    "Upstream device": f"Device {idx + 2}: {diag.upstream_device}",
                     "Min margin (s)": round(diag.min_margin_s, 4)
                     if np.isfinite(diag.min_margin_s)
                     else "N/A",
@@ -782,7 +788,7 @@ def main() -> None:
                     if np.isfinite(diag.current_at_min_a)
                     else "N/A",
                 }
-                for diag in diagnostics
+                for idx, diag in enumerate(diagnostics)
             ]
         )
 
